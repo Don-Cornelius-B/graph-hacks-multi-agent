@@ -1,7 +1,7 @@
 # GraphOps: Autonomous Incident Triage & Stateful Multi-Agent Coordination via FalkorDB
 
 [![FalkorDB](https://img.shields.io/badge/Graph_Database-FalkorDB_v4.22.1-red.svg)](https://www.falkordb.com/)
-[![Gemini](https://img.shields.io/badge/LLM_Engine-Google_Gemini_3.8_Flash-blue.svg)](https://ai.google.dev/)
+[![Gemini](https://img.shields.io/badge/LLM_Engine-Google_Gemini_3.7_Flash-blue.svg)](https://ai.google.dev/)
 [![Track 1](https://img.shields.io/badge/Hackathon-Track_1:_Connected_Data-orange.svg)](#hackathon-track-eligibility)
 [![Track 2](https://img.shields.io/badge/Hackathon-Track_2:_Agent_Memory_%26_Coordination-green.svg)](#hackathon-track-eligibility)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
@@ -161,14 +161,14 @@ git clone https://github.com/Don-Cornelius-B/graph-hacks-multi-agent.git
 cd graph-hacks-multi-agent
 ```
 
-#### 2. Start FalkorDB Engine
-Run the official FalkorDB Docker container publishing port `6379`:
+#### 2. Start FalkorDB Engine & FalkorDB Browser
+Launch both FalkorDB Server and FalkorDB Browser using Docker Compose:
 ```bash
-docker run -d -p 6379:6379 --restart unless-stopped --name falkordb-server falkordb/falkordb-server:latest
+docker compose up -d
 ```
-Verify FalkorDB is running:
+Verify both containers are running (`falkordb-server` on port `6379`, `falkordb-browser` on port `3000`):
 ```bash
-docker ps --filter "name=falkordb-server"
+docker ps --filter "name=falkordb"
 ```
 
 #### 3. Set Up Virtual Environment & Dependencies
@@ -192,7 +192,7 @@ FALKORDB_GRAPH=infra_ops
 
 # Google Gemini Configuration
 GEMINI_API_KEY=your_actual_gemini_api_key_here
-GEMINI_MODEL=gemini-3.8-flash
+GEMINI_MODEL=gemini-3.7-flash
 ```
 
 #### 5. Seed the Infrastructure Graph
@@ -225,48 +225,55 @@ python verify_memory.py
 3. Both baseline memory (`INC-101`) and the new auto-remediated memory (`INC-102`) exist with valid `:RESOLVED_BY` edges.
 4. Outputs 3 formatted ASCII tables and exits with code `0`.
 
+#### 8. Visualize the Live Graph in FalkorDB Browser
+Open your browser and navigate to the FalkorDB Browser interface:
+```text
+http://localhost:3000
+```
+1. Select graph: `infra_ops`
+2. Run the visual canvas Cypher query:
+```cypher
+MATCH (n) OPTIONAL MATCH (n)-[r]->(m) RETURN n, r, m
+```
+*Explore the live interactive canvas:*
+- **Topology Subgraph:** Inspect `(:Service)` and `(:Database)` nodes connected via `[:DEPENDS_ON]` edges.
+- **Coordination Ticket Subgraph:** Click on `(:Handoff {id: 'INC-102', status: 'RESOLVED'})` connected via `[:TARGETS]` to `redis-session`.
+- **Episodic Memory Subgraph:** Observe `(:Incident)` nodes (`INC-101`, `INC-102`) linked via `[:RESOLVED_BY]` to `(:Runbook)` nodes (`RB-04`, `RB-AUTO-INC-102`).
+
 ---
 
 ### Production Deployment Notes
 
 #### Docker Compose Deployment
-In production, GraphOps can be deployed via Docker Compose with FalkorDB and the agent runners running in an isolated network:
+The root [`docker-compose.yml`](file:///d:/Don/GithubClones/graph-hacks-multi-agent/docker-compose.yml) connects FalkorDB Server and FalkorDB Browser on an isolated bridge network (`falkor-network`):
 
 ```yaml
-version: '3.8'
-
 services:
   falkordb:
     image: falkordb/falkordb-server:latest
     container_name: falkordb-server
-    restart: unless-stopped
+    restart: always
     ports:
       - "6379:6379"
-    volumes:
-      - falkordb-data:/var/lib/falkordb/data
+    networks:
+      - falkor-network
 
-  diagnostic-agent:
-    build: .
-    command: python agent_ops.py --agent diagnostic
+  falkordb-browser:
+    image: falkordb/falkordb-browser:latest
+    container_name: falkordb-browser
+    restart: always
+    ports:
+      - "3000:3000"
     environment:
-      - FALKORDB_HOST=falkordb
-      - FALKORDB_PORT=6379
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - FALKORDB_URL=redis://falkordb:6379
     depends_on:
       - falkordb
+    networks:
+      - falkor-network
 
-  remediation-agent:
-    build: .
-    command: python agent_ops.py --agent remediation
-    environment:
-      - FALKORDB_HOST=falkordb
-      - FALKORDB_PORT=6379
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
-    depends_on:
-      - falkordb
-
-volumes:
-  falkordb-data:
+networks:
+  falkor-network:
+    driver: bridge
 ```
 
 #### Kubernetes Architecture
@@ -374,6 +381,7 @@ When `verify_memory.py` executes against FalkorDB following an autonomous triage
 ```text
 graph-hacks-multi-agent/
 │
+├── docker-compose.yml     # Orchestrates FalkorDB Server (6379) & FalkorDB Browser (3000)
 ├── agent_ops.py           # Core multi-agent pipeline (Agent 1 & Agent 2 runners and tool layers)
 ├── verify_memory.py       # Automated verification suite with ASCII table output
 ├── seed_graph.py          # Seeds baseline microservice topology and historical runbooks

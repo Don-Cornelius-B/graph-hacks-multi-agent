@@ -9,6 +9,12 @@ import os
 import sys
 import json
 from typing import Dict, Any, List
+
+# Ensure UTF-8 output on Windows consoles
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8")
 from dotenv import load_dotenv
 from falkordb import FalkorDB
 from google import genai

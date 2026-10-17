@@ -1,0 +1,26 @@
+services:
+  falkordb:
+    image: falkordb/falkordb-server:latest
+    container_name: falkordb-server
+    restart: always
+    ports:
+      - "6379:6379"
+    networks:
+      - falkor-network
+
+  falkordb-browser:
+    image: falkordb/falkordb-browser:latest
+    container_name: falkordb-browser
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - FALKORDB_URL=redis://falkordb:6379
+    depends_on:
+      - falkordb
+    networks:
+      - falkor-network
+
+networks:
+  falkor-network:
+    driver: bridge
