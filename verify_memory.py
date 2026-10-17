@@ -1,9 +1,10 @@
 """
-Verify Memory: Automated verification script for FalkorDB incident triage
+Verify Memory: Automated verification script for FalkorDB decoupled multi-agent triage
 Targeting Milestone 3:
   - Asserts target service 'redis-session' status is 'healthy'
-  - Asserts new :Incident and :Runbook nodes exist and are linked via :RESOLVED_BY
-  - Prints clear ASCII/tabular view of all graph memory edges and topology nodes
+  - Asserts stateful :Handoff ticket lifecycle (status == 'RESOLVED' and [:TARGETS]->target)
+  - Asserts episodic memory persistence (baseline INC-101 and new auto-remediated Incident-[:RESOLVED_BY]->Runbook)
+  - Prints clear ASCII / formatted tabular views of Handoffs, Graph Memory, and Topology
 """
 
 import os
@@ -39,14 +40,15 @@ def format_table(headers, rows):
     col_widths = [len(h) for h in headers]
     for row in rows:
         for i, val in enumerate(row):
-            col_widths[i] = max(col_widths[i], len(str(val)))
+            val_str = str(val)[:60]  # truncate long strings for terminal
+            col_widths[i] = max(col_widths[i], len(val_str))
             
     sep = "+" + "+".join("-" * (w + 2) for w in col_widths) + "+"
     header_line = "|" + "|".join(f" {headers[i].ljust(col_widths[i])} " for i in range(len(headers))) + "|"
     
     lines = [sep, header_line, sep]
     for row in rows:
-        row_line = "|" + "|".join(f" {str(row[i]).ljust(col_widths[i])} " for i in range(len(row))) + "|"
+        row_line = "|" + "|".join(f" {str(row[i])[:60].ljust(col_widths[i])} " for i in range(len(row))) + "|"
         lines.append(row_line)
     lines.append(sep)
     return "\n".join(lines)
@@ -60,14 +62,17 @@ def run_verification(target_service="redis-session") -> bool:
     db = FalkorDB(host=host, port=port)
     graph = db.select_graph(graph_name)
 
-    print(f"\n{BOLD}{CYAN}{'='*72}{RESET}")
-    print(f"{BOLD}{CYAN}🔍 FALKORDB GRAPH MEMORY & TOPOLOGY VERIFICATION{RESET}")
+    print(f"\n{BOLD}{CYAN}{'='*75}{RESET}")
+    print(f"{BOLD}{CYAN}🔍 FALKORDB MULTI-AGENT STATE & MEMORY VERIFICATION{RESET}")
     print(f"{BOLD}Graph:{RESET} {graph_name} on {host}:{port}")
-    print(f"{BOLD}{CYAN}{'='*72}{RESET}\n")
+    print(f"{BOLD}Target Component:{RESET} {target_service}")
+    print(f"{BOLD}{CYAN}{'='*75}{RESET}\n")
 
     assertions_passed = True
 
-    # 1. Assert Target Service Status
+    # ------------------------------------------------------------------
+    # 1. Health Status Assertion
+    # ------------------------------------------------------------------
     print(f"{BOLD}1. Verifying Service Health Status...{RESET}")
     svc_query = "MATCH (s {name: $name}) RETURN s.name AS name, s.status AS status, labels(s) AS labels"
     svc_res = graph.query(svc_query, {"name": target_service})
@@ -77,42 +82,83 @@ def run_verification(target_service="redis-session") -> bool:
         assertions_passed = False
     else:
         name, status, labels = svc_res.result_set[0]
+        label_str = labels[0] if labels else "Node"
         if status == "healthy":
-            print(f"  {GREEN}✅ Target '{name}' ({labels[0] if labels else 'Node'}) status is 'healthy'!{RESET}")
+            print(f"  {GREEN}✅ Target '{name}' ({label_str}) status is 'healthy'!{RESET}")
         else:
-            print(f"  {RED}❌ Target '{name}' status is '{status}' (expected 'healthy')!{RESET}")
+            print(f"  {RED}❌ Target '{name}' ({label_str}) status is '{status}' (expected 'healthy')!{RESET}")
             assertions_passed = False
 
-    # 2. Query and Assert Episodic Memory Nodes & Edges
-    print(f"\n{BOLD}2. Verifying Episodic Incident Memory & Runbooks...{RESET}")
+    # ------------------------------------------------------------------
+    # 2. Handoff Coordination Assertion
+    # ------------------------------------------------------------------
+    print(f"\n{BOLD}2. Verifying Stateful Handoff Ticket Lifecycle...{RESET}")
+    handoff_query = (
+        "MATCH (h:Handoff)-[r:TARGETS]->(s) "
+        "RETURN h.id AS handoff_id, h.status AS status, coalesce(h.diagnosis, 'N/A') AS diagnosis, s.name AS target "
+        "ORDER BY h.created_at ASC"
+    )
+    handoff_res = graph.query(handoff_query)
+    handoff_rows = handoff_res.result_set if handoff_res.result_set else []
+
+    has_resolved_handoff = any(
+        row[1] == "RESOLVED" and row[3] == target_service
+        for row in handoff_rows
+    )
+
+    if has_resolved_handoff:
+        print(f"  {GREEN}✅ Verified active handoff ticket resolved state ('RESOLVED') targeting '{target_service}'!{RESET}")
+    else:
+        print(f"  {RED}❌ No resolved handoff ticket found for '{target_service}'!{RESET}")
+        assertions_passed = False
+
+    # ------------------------------------------------------------------
+    # 3. Episodic Memory Persistence Assertion
+    # ------------------------------------------------------------------
+    print(f"\n{BOLD}3. Verifying Episodic Incident Memory & Runbooks...{RESET}")
     memory_query = (
         "MATCH (i:Incident)-[r:RESOLVED_BY]->(rb:Runbook) "
         "RETURN i.id AS incident_id, coalesce(i.root_cause, i.summary, 'N/A') AS root_cause, "
         "type(r) AS rel, rb.id AS runbook_id, rb.action AS action, coalesce(rb.target, 'N/A') AS target"
     )
     mem_res = graph.query(memory_query)
-
     mem_rows = mem_res.result_set if mem_res.result_set else []
 
-    # Check if a newly generated incident or runbook exists
-    has_auto_runbook = any(
+    has_baseline = any(row[0] == "INC-101" for row in mem_rows)
+    has_new_incident = any(
         (str(row[3]).startswith("RB-AUTO-") or row[0] != "INC-101") and row[5] == target_service
         for row in mem_rows
     )
 
-    if has_auto_runbook:
-        print(f"  {GREEN}✅ New auto-remediated Incident and Runbook nodes verified with :RESOLVED_BY relationship!{RESET}")
+    if has_baseline and has_new_incident:
+        print(f"  {GREEN}✅ Both baseline seed (INC-101) and new remediated incident verified with :RESOLVED_BY edges!{RESET}")
+    elif not has_baseline:
+        print(f"  {RED}❌ Baseline incident INC-101 missing from graph memory!{RESET}")
+        assertions_passed = False
     else:
-        print(f"  {RED}❌ No newly created Incident/Runbook memory found for '{target_service}'!{RESET}")
+        print(f"  {RED}❌ Newly persisted incident memory for '{target_service}' missing!{RESET}")
         assertions_passed = False
 
-    # 3. Print Tabular View of Graph Memory Edges
-    print(f"\n{BOLD}{CYAN}📊 GRAPH MEMORY EDGES (:Incident -[:RESOLVED_BY]-> :Runbook):{RESET}")
-    mem_headers = ["Incident ID", "Root Cause / Summary", "Relationship", "Runbook ID", "Action Taken", "Target"]
-    print(format_table(mem_headers, mem_rows))
+    # ------------------------------------------------------------------
+    # 4. Tabular ASCII Visualizations
+    # ------------------------------------------------------------------
+    print(f"\n{BOLD}{CYAN}📋 TABLE 1: HANDOFF TICKET LIFECYCLE (:Handoff -[:TARGETS]-> :Service|Database):{RESET}")
+    handoff_headers = ["Handoff ID", "Status", "Target Component", "Diagnosis Summary"]
+    formatted_handoffs = [
+        [row[0], row[1], row[3], (row[2][:65] + "...") if len(row[2]) > 65 else row[2]]
+        for row in handoff_rows
+    ]
+    print(format_table(handoff_headers, formatted_handoffs))
 
-    # 4. Print Tabular View of Infrastructure Topology
-    print(f"\n{BOLD}{CYAN}🌐 INFRASTRUCTURE TOPOLOGY STATUS:{RESET}")
+    print(f"\n{BOLD}{CYAN}📊 TABLE 2: GRAPH MEMORY EDGES (:Incident -[:RESOLVED_BY]-> :Runbook):{RESET}")
+    mem_headers = ["Incident ID", "Root Cause / Summary", "Relationship", "Runbook ID", "Action Taken", "Target"]
+    formatted_mems = [
+        [row[0], (row[1][:50] + "...") if len(row[1]) > 50 else row[1], row[2], row[3], row[4], row[5]]
+        for row in mem_rows
+    ]
+    print(format_table(mem_headers, formatted_mems))
+
+    print(f"\n{BOLD}{CYAN}🌐 TABLE 3: LIVE SERVICE TOPOLOGY STATUS:{RESET}")
     topo_query = (
         "MATCH (n) WHERE 'Service' IN labels(n) OR 'Database' IN labels(n) "
         "RETURN n.name AS name, labels(n)[0] AS type, n.status AS status "
@@ -123,13 +169,15 @@ def run_verification(target_service="redis-session") -> bool:
     topo_headers = ["Entity Name", "Type", "Current Status"]
     print(format_table(topo_headers, topo_rows))
 
+    # ------------------------------------------------------------------
     # Final Verdict
-    print(f"\n{BOLD}{'='*72}{RESET}")
+    # ------------------------------------------------------------------
+    print(f"\n{BOLD}{'='*75}{RESET}")
     if assertions_passed:
-        print(f"{BOLD}{GREEN}🎉 ALL FALKORDB MEMORY & TOPOLOGY ASSERTIONS PASSED!{RESET}")
+        print(f"{BOLD}{GREEN}🎉 ALL FALKORDB MULTI-AGENT ASSERTIONS PASSED!{RESET}")
     else:
         print(f"{BOLD}{RED}❌ VERIFICATION FAILED: One or more assertions did not pass.{RESET}")
-    print(f"{BOLD}{'='*72}{RESET}\n")
+    print(f"{BOLD}{'='*75}{RESET}\n")
 
     return assertions_passed
 
