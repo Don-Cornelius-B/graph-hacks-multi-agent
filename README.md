@@ -188,7 +188,41 @@ graph TD
 
 ---
 
-## 4. Deep-Dive: Core Cypher Mechanics & GraphBLAS Engine Advantage
+## 4. Visual Verification & Graph Canvas
+
+To visually inspect and verify the live state, topology, and memory in FalkorDB, we utilize the **FalkorDB Browser** (accessible at `http://localhost:3000`). The screenshots below capture the live state of the `infra_ops` graph following autonomous multi-agent triage and remediation.
+
+### Figure 1: Full Architecture & Active Graph Canvas
+![Figure 1: Full Architecture & Active Graph Canvas](assets/falkordb_full_canvas.png)
+
+* **Multi-Cluster Graph Topology:** Renders all 10 nodes and 8 edges within the `infra_ops` graph in the FalkorDB Browser interactive canvas.
+* **Microservice Topology Cluster (Bottom-Right):** Demonstrates the live service dependency network (`api-gateway` $\to$ `auth-service` / `payment-service` $\to$ `redis-session` / `postgres-primary`) connected via directed `[:DEPENDS_ON]` edges.
+* **Coordination Ticket Binding (Center-Right):** Displays the active, resolved coordination ticket node (`(:Handoff {id: 'INC-102', status: 'RESOLVED'})`) bound via a directed `[:TARGETS]` edge to the remediated `redis-session` database.
+* **Isolated Episodic Memory Pairs (Top-Left & Bottom-Left):** Visualizes the historical baseline incident pair (`(:Incident {id: 'INC-101'})-[:RESOLVED_BY]->(:Runbook {id: 'RB-04'})`) alongside the newly persisted auto-remediation record (`(:Incident {id: 'INC-102'})-[:RESOLVED_BY]->(:Runbook {id: 'RB-AUTO-INC-102'})`), establishing durable cross-session institutional knowledge.
+
+---
+
+### Figure 2: Real-time Node Property Inspector
+![Figure 2: Real-time Node Property Inspector](assets/falkordb_inspector.png)
+
+* **Transactional Health Remediation:** Displays the FalkorDB Browser inspector drawer focused on the `Database` node `redis-session`.
+* **Verified Restored Properties:** Confirms `name: "redis-session"` and `status: "healthy"`, providing visual and structural proof of the atomic state transition executed by Agent 2 from its initial `oom_killed` state.
+* **Bidirectional Edge Inspection:** Confirms the incoming `[:TARGETS]` edge originating from `Handoff(INC-102)` and incoming `[:DEPENDS_ON]` edges originating from `auth-service` and `payment-service`.
+
+---
+
+### Figure 3: FalkorDB High-Level Schema View
+![Figure 3: FalkorDB High-Level Schema View](assets/falkordb_schema.png)
+
+* **Relational Schema Graph:** Illustrates the high-level schema model synthesized by FalkorDB across entity labels and relationship types.
+* **Topology Subgraph Model:** Visualizes `(:Service)-[:DEPENDS_ON]->(:Database)` and `(:Service)-[:DEPENDS_ON]->(:Service)`.
+* **Coordination State Model:** Visualizes `(:Handoff)-[:TARGETS]->(:Database)`.
+* **Episodic Runbook Model:** Visualizes `(:Incident)-[:RESOLVED_BY]->(:Runbook)`.
+* **Zero Structural Collision:** Proves clean structural separation between live operational telemetry, asynchronous agent coordination tickets, and persistent institutional memory.
+
+---
+
+## 5. Deep-Dive: Core Cypher Mechanics & GraphBLAS Engine Advantage
 
 FalkorDB is built on top of the **GraphBLAS** linear algebra library, representing graphs as sparse adjacency matrices and mapping graph traversals to matrix operations. Below is a rigorous analysis of each core OpenCypher query powering GraphOps.
 
@@ -312,7 +346,7 @@ RETURN h.id AS handoff_id,
 
 ---
 
-## 5. End-to-End Autonomous Incident Remediation Walkthrough
+## 6. End-to-End Autonomous Incident Remediation Walkthrough
 
 Below is a complete chronological execution trace demonstrating how GraphOps ingests an alert, traverses the live topology, coordinates across the state barrier, and executes self-healing.
 
@@ -480,7 +514,7 @@ Episodic Memory: Stored INC-102 linked via :RESOLVED_BY to RB-AUTO-INC-102 for f
 
 ---
 
-## 6. Automated Verification & State Assertions
+## 7. Automated Verification & State Assertions
 
 GraphOps includes a standalone verification test suite ([`verify_memory.py`](file:///d:/Don/GithubClones/graph-hacks-multi-agent/verify_memory.py)) designed for CI/CD pipelines (e.g., GitHub Actions). It runs strict Boolean assertions directly against the live FalkorDB instance:
 
@@ -548,7 +582,7 @@ The script exits with status code `0` on total success and `1` on failure, guara
 
 ---
 
-## 7. Local Quickstart & Interactive Reproduction Guide
+## 8. Local Quickstart & Interactive Reproduction Guide
 
 Follow these step-by-step instructions to reproduce the complete GraphOps autonomous incident triage pipeline locally.
 
@@ -647,10 +681,11 @@ MATCH (n) OPTIONAL MATCH (n)-[r]->(m) RETURN n, r, m
    - **Topology Subgraph:** Inspect `(:Service)` and `(:Database)` connected via `[:DEPENDS_ON]` edges.
    - **Coordination Ticket Subgraph:** Click on `(:Handoff {id: 'INC-102', status: 'RESOLVED'})` linked via `[:TARGETS]` to `redis-session`.
    - **Episodic Memory Subgraph:** Observe `(:Incident)` nodes linked via `[:RESOLVED_BY]` to `(:Runbook)` nodes.
+   - *(Refer to Section 4 for reference screenshots of the live interactive canvas, node inspector, and schema model).*
 
 ---
 
-## 8. Enterprise & Production Deployment Architecture
+## 9. Enterprise & Production Deployment Architecture
 
 In enterprise cloud environments, GraphOps deploys natively on Kubernetes as a distributed, event-driven autonomous SRE system:
 
@@ -687,7 +722,7 @@ graph TB
 
 ---
 
-## 9. Engineering Trade-offs & Design Decisions
+## 10. Engineering Trade-offs & Design Decisions
 
 ### 1. FalkorDB vs. Vector Databases for Agentic Workflows
 - **The Vector Trap:** Vector databases excel at fuzzy text similarity, but distributed infrastructure is defined by **rigid topological relationships**. If `api-gateway` degrades because `redis-session` ran out of memory, vector search cannot determine that `api-gateway -> auth-service -> redis-session` is the causal path.
@@ -707,7 +742,7 @@ graph TB
 
 ---
 
-## 10. Repository Topology & File Index
+## 11. Repository Topology & File Index
 
 ```text
 graph-hacks-multi-agent/
@@ -737,7 +772,7 @@ graph-hacks-multi-agent/
 
 ---
 
-## 11. Hackathon Submission Information & License
+## 12. Hackathon Submission Information & License
 
 ### Hackathon Metadata
 - **Hackathon:** [FalkorDB "Graph Hacks" Hackathon](https://www.wemakedevs.org/hackathons/falkordb)
