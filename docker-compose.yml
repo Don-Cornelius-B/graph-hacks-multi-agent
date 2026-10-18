@@ -1,26 +1,22 @@
+version: '3.8'
+
 services:
   falkordb:
     image: falkordb/falkordb-server:latest
     container_name: falkordb-server
-    restart: always
+    restart: unless-stopped
     ports:
       - "6379:6379"
-    networks:
-      - falkor-network
+      - "3000:3000"
 
   falkordb-browser:
     image: falkordb/falkordb-browser:latest
     container_name: falkordb-browser
-    restart: always
-    ports:
-      - "3000:3000"
+    restart: unless-stopped
+    network_mode: "service:falkordb"
     environment:
-      - FALKORDB_URL=redis://falkordb:6379
+      - FALKORDB_URL=redis://127.0.0.1:6379
+      - AUTH_SECRET=0123456789abcdef0123456789abcdef
+      - ENCRYPTION_KEY=0123456789abcdef0123456789abcdef
     depends_on:
       - falkordb
-    networks:
-      - falkor-network
-
-networks:
-  falkor-network:
-    driver: bridge
